@@ -2,6 +2,6 @@ Bom dia.
 
 Meu nome é Natã Schmitt e este é meu repo do T1.
 
-Não comecei ainda, mas minha ideia é pegar o código antigo que fiz um circulo de cores e melhorar ele pra fazer uma roda de cores (color wheel).
+Desisti de fazer uma roda de cores simples e vou fazer um gerador de mandelbrot.
 
-Veremos como irão as coisas. Obrigado.
+Já tem a versão em python como prova de conceito, mais tarde sai a versão Haskell.
