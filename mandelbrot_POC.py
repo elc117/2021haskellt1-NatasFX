@@ -10,29 +10,20 @@ b = [ 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 
 
 def mandelbrotColor(x, y, iterations):
-    cx = x
-    cy = y
 
+    c = complex(x,y)
+
+    z = 0
     for i in range(1, iterations+1):
+        z = z*z + c
+        if abs(z) > 4.5: break
+    
+    if (i == iterations): return ([0,0,0],iterations)
 
-        xsqrd = x*x
-        ysqrd = y*y
+    peso = (abs(z) - 4.5)/25
+    peso = .98 if peso > 1 else peso
 
-        nx = xsqrd - ysqrd + cx
-        ny = 2*x*y + cy
-
-        y = ny
-        x = nx
-
-        if ((xsqrd + ysqrd)/2 > 4.5): break
-
-    if (i == iterations): return [0,0,0]
-    if i == 1: return [255,255,255]
-
-    peso = ((xsqrd + ysqrd)/2 - 4.5)/25
-    peso = 1 if peso > 1 else peso
-
-    colorR = iterations/(i+1-peso)*20
+    colorR = iterations/(i+1-peso)/(i/1.7/iterations)
 
     colorR = 255 if colorR > 255 else colorR
 
@@ -40,18 +31,14 @@ def mandelbrotColor(x, y, iterations):
     #colorG = g[int(iterations/(i+1-peso)*20)%len(g)]
     #colorB = b[int(iterations/(i+1-peso)*20)%len(b)]
 
-    #colorG = 255-(iterations/i)%255*6
-
-    #colorB = 255-(iterations/i)%255*7
-
-    return [colorR, colorR, colorR]
+    return ([colorR, colorR, colorR], i)
 
 def calcPixel(data, width, height, startingY, endY, size, iterations, offsetX, offsetY, pipe):
-    
+
     for x in range(int(2*width)):
         for y in range(startingY, endY):
-            data[y-startingY][x] = mandelbrotColor((x-width)/(size)+offsetX, (y-height)/(size)+offsetY, iterations)
-
+            data[y-startingY][x], n = mandelbrotColor((x-width)/(size)+offsetX, (y-height)/(size)+offsetY, iterations)
+        
     pipe.send((data, startingY, endY))
     pipe.close()
 
@@ -75,11 +62,11 @@ def createMandelbrot(WIDTH, HEIGHT, NUMBERTHREADS, ITERATIONS, SCALE):
             end,
             SCALE,
             ITERATIONS,
-            #0.36024044343761436323612524444954530848260780795858575048837581474019534605,
-            #-0.64131306106480317486037501517930206657949495228230525955617754306444857417,
-            #-.865000025,
-            -.73,
-            -.245,
+            0.36024044343761436323612524444954530848260780795858575048837581474019534605,
+            -0.64131306106480317486037501517930206657949495228230525955617754306444857417,
+            #-.8650000261,
+            #-1.444,
+            #-.245,
             snd
         ]
         process = Process(target=calcPixel, args=arg)
@@ -96,32 +83,17 @@ def createMandelbrot(WIDTH, HEIGHT, NUMBERTHREADS, ITERATIONS, SCALE):
 
 if __name__ == '__main__':
 
-    elapsed = datetime.now()
+    beginTime = datetime.now()
 
-    NUMBERTHREADS = 8
-    WIDTH  = 800
-    HEIGHT = 600
+    NUMBERTHREADS = 16
+    WIDTH  = 1280
+    HEIGHT = 720
 
-    numberOfFrames = 1
+    scale = 25000000000000
+    iter  = int(4300)
 
-    #ffmpeg -framerate 24 -i %d.png -c:v libx264 -pix_fmt yuv420p output.mp4
+    img = createMandelbrot(WIDTH, HEIGHT, NUMBERTHREADS, iter, scale)
+    img.show()
 
-    finalZoom = 20000
-
-    scales = []
-    for i in range(1, numberOfFrames+1):
-        scales.append((i, int((finalZoom/numberOfFrames)*i)))
-
-    #aumentar 1 iteracao a cada 585937 de zoom
-
-    for i, scale in scales:
-        beginTime = datetime.now()
-
-        img = createMandelbrot(WIDTH, HEIGHT, NUMBERTHREADS, 280, scale)
-        img.show()
-        #break
-
-        img.save(f"./images/{i}.png", "PNG")
-        print(f'\rComputed {i+1} frame - {NUMBERTHREADS} threads - time: {(datetime.now()-beginTime).total_seconds():.1f}s', end='')
-
-    print(f'\nRendered {i} frames - time elapsed: {(datetime.now()-elapsed).total_seconds():.0f}s')
+    img.save(f"./images/mandelbrot.png", "PNG")
+    print(f'Computed frame - {NUMBERTHREADS} threads {iter} {scale} - time: {(datetime.now()-beginTime).total_seconds():.1f}s')
