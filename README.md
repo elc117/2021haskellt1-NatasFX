@@ -1,7 +1,9 @@
-Bom dia.
+Saudações;
 
-Meu nome é Natã Schmitt e este é meu repo do T1.
+Este é meu trabalho 1 da disciplina de Paradigmas de Programação.
 
-Desisti de fazer uma roda de cores simples e vou fazer um gerador de mandelbrot.
+Mandelbrot feito em Haskell usando JuicyPixels.
 
-Já tem a versão em python como prova de conceito, mais tarde sai a versão Haskell.
+`Protótipo feito em Python na pasta Python`
+
+```cabal run```
