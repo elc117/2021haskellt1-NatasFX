@@ -4,3 +4,5 @@ etc
 cabal.sandbox.config
 mandelbrot.*
 dist
+.vscode
+.ghc
