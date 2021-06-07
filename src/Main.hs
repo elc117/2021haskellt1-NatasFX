@@ -1,7 +1,7 @@
 {-
-    Programa em haskell para gerar Mandelbrot
-    Trabalho 1 de Paradigmas de Programação
-    Autoria: Natã Schmitt
+  Programa em haskell para gerar Mandelbrot
+  Trabalho 1 de Paradigmas de Programação
+  Autoria: Natã Schmitt
 -}
 
 import Codec.Picture
