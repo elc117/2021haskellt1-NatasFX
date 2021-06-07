@@ -2,5 +2,5 @@ images
 etc
 .cabal-sandbox
 cabal.sandbox.config
-mandelbrot.bmp
+mandelbrot.*
 dist
