@@ -6,7 +6,12 @@
 
 import Codec.Picture
 import Text.Printf ( printf )
-import Graphics.Gloss ()
+import Graphics.Gloss
+import Graphics.Gloss.Juicy
+import Graphics.Gloss.Data.ViewPort
+import Graphics.Gloss.Interface.Pure.Game
+import Data.Matrix (Matrix, zero, unsafeGet, mapPos, mapCol, getElem, setElem, safeGet)
+import Graphics.Gloss.Raster.Field
 
 type Complex = (Double, Double)
 
@@ -15,13 +20,13 @@ type Complex = (Double, Double)
 -- Variáveis pré-definidas
 -----------------------------------------------------------
 width, height, maxIter, hueOffset :: Int
-width = 720
-height = 1280
+width = 800
+height = 600
 maxIter = 255
-hueOffset = 15
+hueOffset = 10--30
 
-coordY, coordX, scale :: Double
-scale = 400000000
+coordY, coordX, scaling :: Double
+scaling = 400000000
 coordX = -1.940157358
 coordY = 0
 
@@ -29,17 +34,30 @@ data RenderState = State
   {
     size :: Double,
     cX :: Double,
-    cY :: Double
+    cY :: Double,
+    hue :: Double,
+    matrix :: Matrix Int,
+    redraw :: Bool
   } deriving Show
+
+initialState :: RenderState
+initialState = State {
+  size = 200,
+  cX = -1.940157358,
+  cY = 0,
+  hue = 1,
+  matrix = zero width height,
+  redraw = True
+}
 
 
 -----------------------------------------------------------
 -- Criação de paletas de cor
 -----------------------------------------------------------
-filterPallete :: [(Double, Double, Double)] -> [(Pixel8, Pixel8, Pixel8)]
+filterPallete :: [(Double, Double, Double)] -> [(Int, Int, Int)]
 filterPallete = map (\(r,g,b) -> (round r, round g, round b))
 
-pallete, laranja, azul, roxo, verde :: [(Pixel8, Pixel8, Pixel8)]
+pallete, laranja, azul, roxo, verde :: [(Int, Int, Int)]
 laranja = filterPallete (zip3 [0..254.0] [0,0.72..184] (replicate 254 0.0))
 
 verde = filterPallete (zip3 [0,0.46..120] [0..255.0] (replicate 254 0.0))
@@ -67,27 +85,47 @@ calcPoint (cx,cy) (zx,zy) iter
   | otherwise = iter
   where newZ = (zx*zx - zy*zy + cx , 2*zx*zy + cy)
 
-colorFromIter :: Int -> Int -> PixelRGB8
-colorFromIter iter hue = (\(r,g,b) -> PixelRGB8 r g b) n
-  where n = if iter == maxIter then (0,0,0) else pallete!!mod ((iter+hue+hueOffset)*6) maxi
+colorFromIter :: Double -> Int -> Color
+--colorFromIter :: Double -> Int -> PixelRGB8 
+colorFromIter hue iter = (\(r,g,b) -> makeColorI r g b 255) n
+  where n = if iter == maxIter then (0,0,0) else pallete!!mod (round $ hue + fromIntegral (iter+hueOffset)*6) maxi
 
 
 -----------------------------------------------------------
 -- Criação da imagem
 -----------------------------------------------------------
-genStr :: [Int] -> [(String, Int)]
-genStr = map (\x -> (printf "./etc/anim/%d.png" x, x))
-
 --ffmpeg -framerate 24 -i %d.png -c:v libx264 -crf 25 -pix_fmt yuv420p output.mp4
 
-main :: IO [()]
-main = mapM doAnim (genStr [0..10])
+window :: Display
+window = InWindow "Mandelbrot" (width, height) (10,10)
 
-doAnim :: (String, Int) -> IO ()
-doAnim s =
-  writePng (fst s) $ generateImage genPixel width height
-    where genPixel x y = colorFromIter (calcPoint (xPos, yPos) (0,0) 0) (snd s*2)
-            where xPos = (x'-w/2)/(scale+(100000*fromIntegral (snd s)^2)*fromIntegral (snd s))+coordX
-                  yPos = (y'-h/2)/(scale+(100000*fromIntegral (snd s)^2)*fromIntegral (snd s))+coordY
-                  (w,h) = (fromIntegral width, fromIntegral height)
-                  (x', y') = (fromIntegral x, fromIntegral y)
+genPixel :: RenderState -> (Int,Int) -> Int
+genPixel rs (x,y) = calcPoint (xPos, yPos) (0,0) 0
+  where xPos = (x'-w/2)/size rs+cX rs
+        yPos = (y'-h/2)/size rs+cY rs
+        (w,h) = (fromIntegral width, fromIntegral height)
+        (x', y') = (fromIntegral x, fromIntegral y)
+
+
+recomputeMatrix :: RenderState -> RenderState
+recomputeMatrix rs = rs {
+  redraw = False,
+  matrix = mapPos (\x a -> genPixel rs x) $ matrix rs
+}
+
+render :: RenderState -> Point -> Color
+render rs (x,y) = colorFromIter (hue rs) $ getElem (round ((x+1) * 400)+1) (round ((y+1) * 300)+1) (matrix rs)
+
+eventHandler :: Event -> RenderState -> RenderState
+eventHandler (EventKey (Char 'q') _ _ _) rs = rs
+eventHandler _ rs = rs
+
+update :: Float -> RenderState -> RenderState
+update time rs
+  | redraw rs = recomputeMatrix rs
+  | otherwise = rs { hue = hue rs+1 }
+
+main :: IO ()
+main =
+  playField window (1,1) 60 initialState render eventHandler update
+
