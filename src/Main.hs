@@ -20,8 +20,8 @@ type Complex = (Double, Double)
 -- Variáveis pré-definidas
 -----------------------------------------------------------
 width, height, maxIter, hueOffset :: Int
-width = 800
-height = 600
+width = 1280
+height = 720
 maxIter = 255
 hueOffset = 10--30
 
@@ -37,17 +37,22 @@ data RenderState = State
     cY :: Double,
     hue :: Double,
     matrix :: Matrix Int,
-    redraw :: Bool
+    redraw :: Bool,
+    dragging :: Bool,
+    dragStart :: (Int, Int)
   } deriving Show
+
 
 initialState :: RenderState
 initialState = State {
   size = 200,
-  cX = -1.940157358,
+  cX = -0.5,---1.940157358,
   cY = 0,
   hue = 1,
   matrix = zero width height,
-  redraw = True
+  redraw = True,
+  dragging = False,
+  dragStart = (-1, -1)
 }
 
 
@@ -86,7 +91,6 @@ calcPoint (cx,cy) (zx,zy) iter
   where newZ = (zx*zx - zy*zy + cx , 2*zx*zy + cy)
 
 colorFromIter :: Double -> Int -> Color
---colorFromIter :: Double -> Int -> PixelRGB8 
 colorFromIter hue iter = (\(r,g,b) -> makeColorI r g b 255) n
   where n = if iter == maxIter then (0,0,0) else pallete!!mod (round $ hue + fromIntegral (iter+hueOffset)*6) maxi
 
@@ -95,6 +99,10 @@ colorFromIter hue iter = (\(r,g,b) -> makeColorI r g b 255) n
 -- Criação da imagem
 -----------------------------------------------------------
 --ffmpeg -framerate 24 -i %d.png -c:v libx264 -crf 25 -pix_fmt yuv420p output.mp4
+
+transPos :: Point -> (Int, Int)
+transPos (x,y) = (round ((x+1) * w)+1, round ((y+1) * h)+1)
+  where (w,h) = (fromIntegral width/2, fromIntegral height/2)
 
 window :: Display
 window = InWindow "Mandelbrot" (width, height) (10,10)
@@ -113,17 +121,41 @@ recomputeMatrix rs = rs {
   matrix = mapPos (\x a -> genPixel rs x) $ matrix rs
 }
 
+distanceX :: (Int, Int) -> (Int, Int) -> Int
+distanceX (x1,y1) (x2, y2) = (x2-x1)
+
+distanceY :: (Int, Int) -> (Int, Int) -> Int
+distanceY (x1,y1) (x2, y2) = (y2-y1)
+
 render :: RenderState -> Point -> Color
-render rs (x,y) = colorFromIter (hue rs) $ getElem (round ((x+1) * 400)+1) (round ((y+1) * 300)+1) (matrix rs)
+render rs (x,y) = colorFromIter (hue rs) $ (\(x,y) -> getElem x y (matrix rs)) (transPos (x, y))
+
 
 eventHandler :: Event -> RenderState -> RenderState
-eventHandler (EventKey (Char 'q') _ _ _) rs = rs
+eventHandler (EventKey (Char 'r') _ _ _) rs = rs { redraw = True }
+{- 
+eventHandler (EventKey (MouseButton LeftButton ) Down _ (mX, mY)) rs = rs
+ where rs = rs {
+    redraw = True,
+    dragging = True,
+    dragStart = if fst (dragStart rs) == -1
+      then transPos (mX, mY)
+      else dragStart rs,
+    cX = if dragging rs then cX rs + 0.5{-realToFrac (distanceX (dragStart rs) (transPos (mX, mY)))/size rs -} else cX rs,
+    cY = if dragging rs then cY rs + 0.5{-realToFrac (distanceY (dragStart rs) (transPos (mX, mY)))/size rs -} else cY rs
+  }
+
+eventHandler (EventKey (MouseButton LeftButton ) Up _ _) rs = rs { dragging = False, dragStart = (-1,-1) }
+ -}
+eventHandler (EventKey (MouseButton WheelUp) _ _ _) rs = rs { size = size rs + 100, redraw = True }
+
+eventHandler (EventKey (MouseButton WheelDown) _ _ _) rs = rs { size = if size rs <= 100 then size rs else size rs - 100, redraw = size rs > 100 }
 eventHandler _ rs = rs
 
 update :: Float -> RenderState -> RenderState
 update time rs
   | redraw rs = recomputeMatrix rs
-  | otherwise = rs { hue = hue rs+1 }
+  | otherwise = rs { hue = hue rs+0.1 }
 
 main :: IO ()
 main =
