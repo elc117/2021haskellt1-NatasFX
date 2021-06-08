@@ -6,21 +6,31 @@
 
 import Codec.Picture
 import Text.Printf ( printf )
+import Graphics.Gloss ()
 
 type Complex = (Double, Double)
+
 
 -----------------------------------------------------------
 -- Variáveis pré-definidas
 -----------------------------------------------------------
-width, height, maxIter :: Int
-width = 1080
-height = 1920
+width, height, maxIter, hueOffset :: Int
+width = 720
+height = 1280
 maxIter = 255
+hueOffset = 15
 
 coordY, coordX, scale :: Double
-scale = 550000000
+scale = 400000000
 coordX = -1.940157358
 coordY = 0
+
+data RenderState = State
+  {
+    size :: Double,
+    cX :: Double,
+    cY :: Double
+  } deriving Show
 
 
 -----------------------------------------------------------
@@ -38,11 +48,14 @@ azul = filterPallete (zip3 (replicate 254 0.0) (replicate 254 0.0) [0..255.0])
 
 roxo = filterPallete (zip3 [0..254] (replicate 254 0.0) [0,0.59..150.0])
 
-pallete = cycle (roxoInOut ++ laranjaInOut ++ verdeInOut ++ azulInOut)
+pallete = azulInOut ++ laranjaInOut ++ verdeInOut ++ roxoInOut
   where laranjaInOut = laranja ++ reverse laranja
         verdeInOut = verde ++ reverse verde
         azulInOut = azul ++ reverse azul
         roxoInOut = roxo ++ reverse roxo
+
+maxi :: Int
+maxi = length laranja*2 + length verde*2 + length azul*2 + length roxo*2
 
 
 -----------------------------------------------------------
@@ -56,7 +69,7 @@ calcPoint (cx,cy) (zx,zy) iter
 
 colorFromIter :: Int -> Int -> PixelRGB8
 colorFromIter iter hue = (\(r,g,b) -> PixelRGB8 r g b) n
-  where n = pallete!!mod ((iter+hue)*6) (255*2*3)
+  where n = if iter == maxIter then (0,0,0) else pallete!!mod ((iter+hue+hueOffset)*6) maxi
 
 
 -----------------------------------------------------------
@@ -68,13 +81,13 @@ genStr = map (\x -> (printf "./etc/anim/%d.png" x, x))
 --ffmpeg -framerate 24 -i %d.png -c:v libx264 -crf 25 -pix_fmt yuv420p output.mp4
 
 main :: IO [()]
-main = mapM doAnim (genStr [0..0])
+main = mapM doAnim (genStr [0..10])
 
 doAnim :: (String, Int) -> IO ()
 doAnim s =
   writePng (fst s) $ generateImage genPixel width height
-    where genPixel x y = colorFromIter (calcPoint (xPos, yPos) (0,0) 0) (snd s)
-            where xPos = (x'-w/2)/scale+coordX
-                  yPos = (y'-h/2)/scale+coordY
+    where genPixel x y = colorFromIter (calcPoint (xPos, yPos) (0,0) 0) (snd s*2)
+            where xPos = (x'-w/2)/(scale+(100000*fromIntegral (snd s)^2)*fromIntegral (snd s))+coordX
+                  yPos = (y'-h/2)/(scale+(100000*fromIntegral (snd s)^2)*fromIntegral (snd s))+coordY
                   (w,h) = (fromIntegral width, fromIntegral height)
                   (x', y') = (fromIntegral x, fromIntegral y)
