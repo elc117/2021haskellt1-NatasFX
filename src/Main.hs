@@ -4,14 +4,11 @@
   Autoria: Natã Schmitt
 -}
 
-import Codec.Picture
 import Text.Printf ( printf )
 import Graphics.Gloss
-import Graphics.Gloss.Juicy
-import Graphics.Gloss.Data.ViewPort
 import Graphics.Gloss.Interface.Pure.Game
-import Data.Matrix (Matrix, zero, unsafeGet, mapPos, mapCol, getElem, setElem, safeGet)
 import Graphics.Gloss.Raster.Field
+import Debug.Trace
 
 type Complex = (Double, Double)
 
@@ -20,8 +17,8 @@ type Complex = (Double, Double)
 -- Variáveis pré-definidas
 -----------------------------------------------------------
 width, height, maxIter, hueOffset :: Int
-width = 1280
-height = 720
+width = 800
+height = 600
 maxIter = 255
 hueOffset = 10--30
 
@@ -36,7 +33,7 @@ data RenderState = State
     cX :: Double,
     cY :: Double,
     hue :: Double,
-    matrix :: Matrix Int,
+    matrix :: [[Int]],
     redraw :: Bool,
     dragging :: Bool,
     dragStart :: (Int, Int)
@@ -45,11 +42,11 @@ data RenderState = State
 
 initialState :: RenderState
 initialState = State {
-  size = 200,
+  size = 250,
   cX = -0.5,---1.940157358,
   cY = 0,
   hue = 1,
-  matrix = zero width height,
+  matrix = [[ 0 | y <- [0..height]] | x <- [0..width]],
   redraw = True,
   dragging = False,
   dragStart = (-1, -1)
@@ -77,6 +74,10 @@ pallete = azulInOut ++ laranjaInOut ++ verdeInOut ++ roxoInOut
         azulInOut = azul ++ reverse azul
         roxoInOut = roxo ++ reverse roxo
 
+palleteColor :: [Color]
+palleteColor = [makeColorI r g b 255 | (r,g,b) <- pallete]
+
+
 maxi :: Int
 maxi = length laranja*2 + length verde*2 + length azul*2 + length roxo*2
 
@@ -91,9 +92,7 @@ calcPoint (cx,cy) (zx,zy) iter
   where newZ = (zx*zx - zy*zy + cx , 2*zx*zy + cy)
 
 colorFromIter :: Double -> Int -> Color
-colorFromIter hue iter = (\(r,g,b) -> makeColorI r g b 255) n
-  where n = if iter == maxIter then (0,0,0) else pallete!!mod (round $ hue + fromIntegral (iter+hueOffset)*6) maxi
-
+colorFromIter hue iter = if iter == maxIter then makeColorI 0 0 0 0 else palleteColor!!mod (round $ hue + fromIntegral (iter+hueOffset)*6) maxi
 
 -----------------------------------------------------------
 -- Criação da imagem
@@ -109,16 +108,17 @@ window = InWindow "Mandelbrot" (width, height) (10,10)
 
 genPixel :: RenderState -> (Int,Int) -> Int
 genPixel rs (x,y) = calcPoint (xPos, yPos) (0,0) 0
-  where xPos = (x'-w/2)/size rs+cX rs
-        yPos = (y'-h/2)/size rs+cY rs
+  where xPos = (x'-w/2)/size1+coordX
+        yPos = (y'-h/2)/size1+coordY
         (w,h) = (fromIntegral width, fromIntegral height)
         (x', y') = (fromIntegral x, fromIntegral y)
+        (size1, coordX, coordY) = (size rs, cX rs, cY rs)
 
 
 recomputeMatrix :: RenderState -> RenderState
 recomputeMatrix rs = rs {
   redraw = False,
-  matrix = mapPos (\x a -> genPixel rs x) $ matrix rs
+  matrix = [[genPixel rs (x,y) | y <- [0..height]] | x <- [0..width]]--map (\l -> map (\iter -> genPixel rs (0,0)) l) $ matrix rs
 }
 
 distanceX :: (Int, Int) -> (Int, Int) -> Int
@@ -128,13 +128,14 @@ distanceY :: (Int, Int) -> (Int, Int) -> Int
 distanceY (x1,y1) (x2, y2) = (y2-y1)
 
 render :: RenderState -> Point -> Color
-render rs (x,y) = colorFromIter (hue rs) $ (\(x,y) -> getElem x y (matrix rs)) (transPos (x, y))
-
+render rs p = colorFromIter (hue rs) $ (\(x,y) -> matrix rs !! x !! y) (transPos p)--unsafeGet x y (matrix rs)) (transPos p)
+{-# INLINE render #-}
 
 eventHandler :: Event -> RenderState -> RenderState
-eventHandler (EventKey (Char 'r') _ _ _) rs = rs { redraw = True }
-{- 
-eventHandler (EventKey (MouseButton LeftButton ) Down _ (mX, mY)) rs = rs
+eventHandler (EventKey (Char 'r') _ _ _) rs = traceShow ( show $ redraw rs ) (rs { redraw = True })
+
+
+{- eventHandler (EventKey (MouseButton LeftButton ) Down _ (mX, mY)) rs = rs
  where rs = rs {
     redraw = True,
     dragging = True,
@@ -146,16 +147,22 @@ eventHandler (EventKey (MouseButton LeftButton ) Down _ (mX, mY)) rs = rs
   }
 
 eventHandler (EventKey (MouseButton LeftButton ) Up _ _) rs = rs { dragging = False, dragStart = (-1,-1) }
- -}
+-}
 eventHandler (EventKey (MouseButton WheelUp) _ _ _) rs = rs { size = size rs + 100, redraw = True }
+eventHandler (EventKey (SpecialKey KeyUp) _ _ _) rs = rs { size = size rs + 100, redraw = True }
 
 eventHandler (EventKey (MouseButton WheelDown) _ _ _) rs = rs { size = if size rs <= 100 then size rs else size rs - 100, redraw = size rs > 100 }
+eventHandler (EventKey (SpecialKey KeyDown) _ _ _) rs = rs { size = if size rs <= 100 then size rs else size rs - 100, redraw = size rs > 100 }
 eventHandler _ rs = rs
+{-# NOINLINE eventHandler #-}
+
 
 update :: Float -> RenderState -> RenderState
 update time rs
   | redraw rs = recomputeMatrix rs
-  | otherwise = rs { hue = hue rs+0.1 }
+  | otherwise = rs { hue = oldHue + 1 }
+   where oldHue = hue rs
+{-# NOINLINE update #-}
 
 main :: IO ()
 main =
