@@ -3,6 +3,6 @@ etc
 .cabal-sandbox
 cabal.sandbox.config
 mandelbrot.*
-dist
+dist*
 .vscode
-.ghc
+.ghc*
