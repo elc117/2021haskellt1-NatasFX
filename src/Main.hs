@@ -1,3 +1,4 @@
+{-# LANGUAGE ExplicitNamespaces #-}
 {-
   Programa em haskell para gerar Mandelbrot
   Trabalho 1 de Paradigmas de Programação
@@ -5,20 +6,38 @@
 -}
 
 import Text.Printf ( printf )
-import Graphics.Gloss
-import Graphics.Gloss.Interface.Pure.Game
+import Graphics.Gloss.Accelerate.Data.Picture (bitmapOfArray)
 import Graphics.Gloss.Raster.Field
+import Graphics.Gloss.Interface.Pure.Game
 import Debug.Trace
 
+import Data.Word
+
+import Data.Array.CArray (CArray)
+
+import Data.Array.IArray
+
+
+import Data.Array.Accelerate
+    ( type (:.)((:.)), Z(Z), fromList, Matrix, fill, constant)
+
+import Data.Array.Accelerate.LLVM.Native
+
+
 type Complex = (Double, Double)
+
 
 
 -----------------------------------------------------------
 -- Variáveis pré-definidas
 -----------------------------------------------------------
-width, height, maxIter, hueOffset :: Int
+ 
+width, height, maxIter, hueOffset, mHeight, mWidth, scaleFactor :: Int
 width = 800
 height = 600
+scaleFactor = 3
+(mWidth, mHeight) = (width `div` scaleFactor, height `div` scaleFactor)
+
 maxIter = 255
 hueOffset = 10--30
 
@@ -33,7 +52,7 @@ data RenderState = State
     cX :: Double,
     cY :: Double,
     hue :: Double,
-    matrix :: [[Int]],
+    matrix :: CArray (Int,Int) Int,
     redraw :: Bool,
     dragging :: Bool,
     dragStart :: (Int, Int)
@@ -46,7 +65,7 @@ initialState = State {
   cX = -0.5,---1.940157358,
   cY = 0,
   hue = 1,
-  matrix = [[ 0 | y <- [0..height]] | x <- [0..width]],
+  matrix = array ((0,0),(mWidth,mHeight)) [((x,y), 0) | x <- [0..mWidth], y <- [0..mHeight]],
   redraw = True,
   dragging = False,
   dragStart = (-1, -1)
@@ -74,7 +93,7 @@ pallete = azulInOut ++ laranjaInOut ++ verdeInOut ++ roxoInOut
         azulInOut = azul ++ reverse azul
         roxoInOut = roxo ++ reverse roxo
 
-palleteColor :: [Color]
+palleteColor :: [Color ]
 palleteColor = [makeColorI r g b 255 | (r,g,b) <- pallete]
 
 
@@ -87,7 +106,7 @@ maxi = length laranja*2 + length verde*2 + length azul*2 + length roxo*2
 -----------------------------------------------------------
 calcPoint :: Complex -> Complex -> Int -> Int
 calcPoint (cx,cy) (zx,zy) iter
-  | iter < maxIter && (zx + zy) < 4 = calcPoint (cx,cy) newZ (iter+1)
+  | iter < maxIter && (zx^2 + zy^2) < 4 = calcPoint (cx,cy) newZ (iter+1)
   | otherwise = iter
   where newZ = (zx*zx - zy*zy + cx , 2*zx*zy + cy)
 
@@ -97,11 +116,10 @@ colorFromIter hue iter = if iter == maxIter then makeColorI 0 0 0 0 else pallete
 -----------------------------------------------------------
 -- Criação da imagem
 -----------------------------------------------------------
---ffmpeg -framerate 24 -i %d.png -c:v libx264 -crf 25 -pix_fmt yuv420p output.mp4
 
 transPos :: Point -> (Int, Int)
 transPos (x,y) = (round ((x+1) * w)+1, round ((y+1) * h)+1)
-  where (w,h) = (fromIntegral width/2, fromIntegral height/2)
+  where (w,h) = (fromIntegral mWidth/2, fromIntegral mHeight/2)
 
 window :: Display
 window = InWindow "Mandelbrot" (width, height) (10,10)
@@ -114,45 +132,33 @@ genPixel rs (x,y) = calcPoint (xPos, yPos) (0,0) 0
         (x', y') = (fromIntegral x, fromIntegral y)
         (size1, coordX, coordY) = (size rs, cX rs, cY rs)
 
+cMatrix :: [Int] -> CArray (Int, Int) Int
+cMatrix = listArray ((0, 0), (width,height))
 
 recomputeMatrix :: RenderState -> RenderState
 recomputeMatrix rs = rs {
   redraw = False,
-  matrix = [[genPixel rs (x,y) | y <- [0..height]] | x <- [0..width]]--map (\l -> map (\iter -> genPixel rs (0,0)) l) $ matrix rs
+  matrix = matrix rs // [((x,y), genPixel rs (x,y) ) | x <- [0..mWidth], y <- [0..mHeight]]
 }
 
-distanceX :: (Int, Int) -> (Int, Int) -> Int
-distanceX (x1,y1) (x2, y2) = (x2-x1)
-
-distanceY :: (Int, Int) -> (Int, Int) -> Int
-distanceY (x1,y1) (x2, y2) = (y2-y1)
-
 render :: RenderState -> Point -> Color
-render rs p = colorFromIter (hue rs) $ (\(x,y) -> matrix rs !! x !! y) (transPos p)--unsafeGet x y (matrix rs)) (transPos p)
+--render rs = bitmapOfArray (matrix rs) True
+render rs p = colorFromIter (hue rs) $ matrix rs ! transPos p
 {-# INLINE render #-}
 
 eventHandler :: Event -> RenderState -> RenderState
-eventHandler (EventKey (Char 'r') _ _ _) rs = traceShow ( show $ redraw rs ) (rs { redraw = True })
+eventHandler (EventKey (Char 'r') Down _ _) rs = traceShow ( show $ redraw rs ) (rs { redraw = True })
+
+eventHandler (EventKey (SpecialKey KeyLeft) Down _ _) rs = traceShow "click" rs { redraw = True, cX = cX rs - 0.1  }
+eventHandler (EventKey (SpecialKey KeyRight) Down _ _) rs = rs { redraw = True, cX = cX rs + 0.1  }
 
 
-{- eventHandler (EventKey (MouseButton LeftButton ) Down _ (mX, mY)) rs = rs
- where rs = rs {
-    redraw = True,
-    dragging = True,
-    dragStart = if fst (dragStart rs) == -1
-      then transPos (mX, mY)
-      else dragStart rs,
-    cX = if dragging rs then cX rs + 0.5{-realToFrac (distanceX (dragStart rs) (transPos (mX, mY)))/size rs -} else cX rs,
-    cY = if dragging rs then cY rs + 0.5{-realToFrac (distanceY (dragStart rs) (transPos (mX, mY)))/size rs -} else cY rs
-  }
+eventHandler (EventKey (MouseButton WheelUp) Down _ _) rs = rs { size = size rs + 100, redraw = True }
+eventHandler (EventKey (MouseButton WheelDown) Down _ _) rs = rs { size = if size rs <= 100 then size rs else size rs - 100, redraw = size rs > 100 }
 
-eventHandler (EventKey (MouseButton LeftButton ) Up _ _) rs = rs { dragging = False, dragStart = (-1,-1) }
--}
-eventHandler (EventKey (MouseButton WheelUp) _ _ _) rs = rs { size = size rs + 100, redraw = True }
-eventHandler (EventKey (SpecialKey KeyUp) _ _ _) rs = rs { size = size rs + 100, redraw = True }
 
-eventHandler (EventKey (MouseButton WheelDown) _ _ _) rs = rs { size = if size rs <= 100 then size rs else size rs - 100, redraw = size rs > 100 }
-eventHandler (EventKey (SpecialKey KeyDown) _ _ _) rs = rs { size = if size rs <= 100 then size rs else size rs - 100, redraw = size rs > 100 }
+eventHandler (EventKey (SpecialKey KeyUp) Down _ _) rs = rs { size = size rs + 100, redraw = True }
+eventHandler (EventKey (SpecialKey KeyDown) Down _ _) rs = rs { size = if size rs <= 100 then size rs else size rs - 100, redraw = size rs > 100 }
 eventHandler _ rs = rs
 {-# NOINLINE eventHandler #-}
 
@@ -160,11 +166,10 @@ eventHandler _ rs = rs
 update :: Float -> RenderState -> RenderState
 update time rs
   | redraw rs = recomputeMatrix rs
-  | otherwise = rs { hue = oldHue + 1 }
-   where oldHue = hue rs
+  | otherwise = rs { hue = hue rs + 1 }
 {-# NOINLINE update #-}
 
 main :: IO ()
 main =
-  playField window (1,1) 60 initialState render eventHandler update
+  playField window (scaleFactor,scaleFactor) 30 initialState render eventHandler update
 
