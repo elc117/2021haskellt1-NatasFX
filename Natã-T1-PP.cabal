@@ -17,7 +17,7 @@ cabal-version:       >=1.10
 
 executable Natã-T1-PP
   main-is:             Main.hs
-  -- other-modules:
+  -- other-modules: src/aux.hs
   -- other-extensions:
   build-depends:       base >=4.12 && <4.13, JuicyPixels, ffmpeg-light, WAVE, fft,carray,array
   hs-source-dirs:      src

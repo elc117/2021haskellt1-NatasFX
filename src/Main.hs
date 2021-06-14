@@ -8,12 +8,11 @@ import Codec.Picture
 import Text.Printf ( printf )
 import Codec.FFmpeg.Juicy
 import System.IO
-import System.Exit
+import System.Exit ( exitFailure )
 import Data.WAVE
-import Math.FFT
+import Math.FFT ( dftRC )
 import Data.Array.CArray
-import qualified Data.Array.IArray as Arr
-import Data.Array.Base
+import qualified Data.Array.IArray
 import Data.Complex
 import Data.Maybe
 
@@ -26,15 +25,18 @@ type CComplex = (Double, Double)
 -- Variáveis pré-definidas
 -----------------------------------------------------------
 width, height, maxIter, hueOffset :: Int
-width = 720
-height = 1280
-maxIter = 400
-hueOffset = 0--30
+width = 720           -- largura
+height = 1280         -- altura
+maxIter = 200         -- numero maximo de iterações
+hueOffset = 0         -- caso queira que a cor inicial seja diferente 
 
-coordY, coordX, maxZoom :: Double
-maxZoom = 1.6519276269095182e16
-coordX = 0.36024044343761436323612524444954530848260780795858575048837581474019534605 -- -1.940157358
-coordY = -0.64131306106480317486037501517930206657949495228230525955617754306444857417
+coordY, coordX, maxZoom, framerate :: Double
+maxZoom = 1.0519276269095182e16               --Zoom maximo suportado
+-- -1.940157358
+coordX =  0.36024044343761436323612524444954530848260780795858575048837581474019534605  -- Coordenadas X
+coordY = -0.64131306106480317486037501517930206657949495228230525955617754306444857417  -- Coordenadas Y
+
+framerate = 60    -- Framerate do vídeo
 
 
 -----------------------------------------------------------
@@ -64,14 +66,13 @@ fst3 (x, _, _) = x
 snd3 (_, x, _) = x
 thr (_, _, x) = x
 
-palleteR :: CArray Int Pixel8
-palleteR = palleteVectorR [fst3 x | x <- pallete]
+palVec :: [Pixel8] -> CArray Int Pixel8
+palVec = listArray (0,maxi)
 
-palleteG :: CArray Int Pixel8
-palleteG = palleteVectorG [snd3 x | x <- pallete]
-
-palleteB :: CArray Int Pixel8
-palleteB = palleteVectorB [thr x | x <- pallete]
+palleteR, palleteG, palleteB :: CArray Int Pixel8
+palleteR = palVec [fst3 x | x <- pallete]
+palleteG = palVec [snd3 x | x <- pallete]
+palleteB = palVec [thr x | x <- pallete]
 
 maxi :: Int
 maxi = length laranja*2 + length verde*2 + length azul*2 + length roxo*2
@@ -89,7 +90,7 @@ calcPoint (cx,cy) (zx,zy) iter
 colorFromIter :: Int -> Int -> Int -> PixelRGB8
 colorFromIter hue compression iter
   | iter == maxIter = PixelRGB8 0 0 0
-  | otherwise = PixelRGB8 (palleteR!i) (palleteG!i) (palleteB!i)--pallete!!mod (hue+(iter+hueOffset)*compression) maxi
+  | otherwise = PixelRGB8 (palleteR!i) (palleteG!i) (palleteB!i)
   where i = mod (hue+(iter+hueOffset)*compression) maxi
 
 -----------------------------------------------------------
@@ -99,22 +100,12 @@ genPath :: Int -> FilePath
 genPath = printf "./etc/anim/%d.png"
 
 
-framerate :: Double
-framerate = 60
-
-
 carray :: [Double] -> CArray (Int, Int) Double
-carray = Arr.listArray ((0, 0), (1024,0))
+carray = listArray ((0, 0), (1024,0))
 
 cMatrix :: [Int] -> CArray (Int, Int) Int
-cMatrix = Arr.listArray ((0, 0), (width,height))
+cMatrix = listArray ((0, 0), (width,height))
 
-palleteVectorR :: [Pixel8] -> CArray Int Pixel8
-palleteVectorG :: [Pixel8] -> CArray Int Pixel8
-palleteVectorB :: [Pixel8] -> CArray Int Pixel8
-palleteVectorR = Arr.listArray (0,maxi)
-palleteVectorG = Arr.listArray (0,maxi)
-palleteVectorB = Arr.listArray (0,maxi)
 
 exitFalha :: String -> IO ()
 exitFalha s = do
@@ -123,7 +114,7 @@ exitFalha s = do
 
 
 cleanComplex :: CArray (Int,Int) (Complex Double) -> Int
-cleanComplex c = {- round $ logBase 2 (fromIntegral $  -}sum stripped `div` 10
+cleanComplex c = sum stripped `div` 10
   where stripped = take 7 cleaned
         cleaned = map (\c -> round (sqrt $ realPart c ^2 + imagPart c^2) `div` 100) $ elems c
 
@@ -166,7 +157,7 @@ main = do
 
   s <- putStr "PRONTO??? [Y]"
   s <- getLine
-  mapM_ (\x -> doAnim x samplesPerFrame sampleRate False) adaptedSt
+  mapM_ (\x -> doAnim x samplesPerFrame sampleRate False) $ drop 0 adaptedSt
 
 
 
@@ -179,8 +170,9 @@ genIter x y frame db = calcPoint (xPos, yPos) (0,0) 0
         yPos = (y'-h/2)/size+coordY
         (w, h) = (fromIntegral width, fromIntegral height)
         (x', y') = (fromIntegral x, fromIntegral y)
-        size = 2** if frame == -1 then 28
-         else fromIntegral (frame + db `div` 800)/(framerate*2.4)+7
+        size = 2** if frame == -1 then 28 else exponent
+        exponent = if exp > maxZoom then maxZoom else exp
+        exp = fromIntegral (frame + db `div` 200)/(framerate*10)+7
 
 
 readMatrix :: Int -> Int -> Int
@@ -198,7 +190,7 @@ doAnim info samplesPerFrame sampleRate static = do
   where genPixel x y = colorFromIter hue compression $ if static then readMatrix x y else genIter x y frameN hueDB
         (h,c) = (hueDB `div` 100, db `div` 9000)
         hue = mod (db `div` 300 + h + frameN `div` 60) maxi
-        compression = 6 + if c <= 1 then 0 else c
+        compression = 6 -- + if c <= 1 then 0 else c
         (path, frameN, db) = (genPath $ fst s, fromIntegral $ fst s, snd s)
         (s, hueDB) = info
 
