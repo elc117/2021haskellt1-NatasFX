@@ -6,7 +6,7 @@
 
 import Codec.Picture
 import Text.Printf ( printf )
-import Codec.FFmpeg.Juicy
+import Codec.FFmpeg.Juicy ( imageWriter )
 import Codec.FFmpeg.Encode
 import System.IO
 import System.Exit ( exitFailure, exitSuccess )
@@ -16,6 +16,7 @@ import Data.Array.CArray
 import qualified Data.Array.IArray
 import Data.Complex
 import Data.Maybe
+import Data.Char
 
 
 type CComplex = (Double, Double)
@@ -24,12 +25,16 @@ type CComplex = (Double, Double)
 -----------------------------------------------------------
 -- Variáveis pré-definidas
 -----------------------------------------------------------
+musicPath, videoPath, imagesPath :: FilePath
 width, height, maxIter, hueOffset, sensitivity :: Int
 coordY, coordX, maxZoom, framerate, fixedZoom :: Double
-estático :: Bool
 
-width = 2160           -- largura
-height = 3840         -- altura
+musicPath = "./mandeloso.wav"
+videoPath = "./mandelbrot.mp4"
+imagesPath = "./anim/%d.png"
+
+width = 512           -- largura
+height = 512         -- altura
 maxIter = 400        -- numero maximo de iterações
 hueOffset = 100         -- caso queira que a cor inicial seja diferente 
 
@@ -37,14 +42,16 @@ maxZoom = 1.0519276269095182e16               --Zoom maximo suportado
 -- -1.940157358
 coordX =  0.36024044343761436323612524444954530848260780795858575048837581474019534605  -- Coordenadas X
 coordY = -0.64131306106480317486037501517930206657949495228230525955617754306444857417  -- Coordenadas Y
+framerate = 30        -- Framerate do vídeo
 
-framerate = 30    -- Framerate do vídeo
-
-sensitivity = 15  -- Sensibilidade ao grave - maior = menos sensível
-
-estático = True   -- Quando True ele não fará zoom e se manterá estático em fixedZoom
-
+sensitivity = 15      -- Sensibilidade ao grave maior = menos sensível
 fixedZoom = 13--27.8  -- Zoom caso estático for True
+
+
+estático :: Bool
+estático = True       -- Quando True ele não fará zoom e se manterá estático em fixedZoom
+
+
 
 
 -----------------------------------------------------------
@@ -56,15 +63,20 @@ snd3 (_, x, _) = x
 thr (_, _, x)  = x
 
 genPath :: Int -> FilePath
-genPath = printf "./anim/%d.png"
+genPath = printf imagesPath
 
 exitFalha :: String -> IO ()
 exitFalha s = do
-  a <- print s
+  a <- putStrLn s
   exitFailure
 
 toFloat :: Int -> Double
 toFloat i = fromIntegral i :: Double
+
+status :: Int -> Double -> IO ()
+status total n = do
+  putStr (printf "\r%.f%%\t- %d/%d Frames" (n/toFloat total*100) (round n::Int) total)
+
 
 -----------------------------------------------------------
 -- Criação de paletas de cor
@@ -113,12 +125,12 @@ colorFromIter hue iterPoint
   | otherwise = PixelRGB8 (palleteR!i) (palleteG!i) (palleteB!i)
   where (iter,mag) = iterPoint
         i = truncate $ color * toFloat maxi
-        color = toFloat ix / toFloat points
+        color = toFloat ix / toFloat points -- Entre 0 e 1, representa um ciclo de cores
         ix      = truncate (sqrt (toFloat iter + 1 - logBase 2 (logBase 2 mag))*256 + toFloat hue*5 + toFloat hueOffset ) `mod` points
         points  = 2048
 
 genIter :: Int -> Int -> Int -> Int -> (Int, Double)
-genIter x y frame db = calcPoint (xPos, yPos) (0,0) 0
+genIter  x y frame db = calcPoint (xPos, yPos) (0,0) 0
   where xPos = (x'-w/2)/size+coordX
         yPos = (y'-h/2)/size+coordY
         (w, h) = (fromIntegral width, fromIntegral height)
@@ -168,7 +180,7 @@ getAnimationTimings :: [Double] -> [Int] -> Int -> Int -> [((Int, Int), Int)]
 getAnimationTimings samples rangeFrames spf dur = map (\(sz, db) -> ((sz, db), foldl1 (\n x -> n + x `div` 15) $ take sz [snd t | t <- newSt])) newSt
   where newSt = map (\sz -> (sz, foldl1 (\n x -> n - (n-x) `div` 4) $ take sz st)) [2..dur * round framerate]
         st = map (\x -> cleanComplex $ dftRC $ carray $ drop (spf*x+1) samples) rangeFrames
-        
+
 
 -----------------------------------------------------------
 -- Criação da imagem
@@ -176,8 +188,8 @@ getAnimationTimings samples rangeFrames spf dur = map (\(sz, db) -> ((sz, db), f
 --ffmpeg -framerate 30 -i %d.png -c:v libx264 -crf 10 -pix_fmt yuv420p output.mp4 && ffmpeg -i output.mp4 -i ../mandelbrot.wav -map 0:v -map 1:a -c:v copy -shortest output1.mp4
 --ffmpeg -i output.mp4 -i ../../mandelbrot.wav -map 0:v -map 1:a -c:v copy -shortest output1.mp4
 
-doAnim :: ((Int, Int),Int) -> Int -> Int -> Bool -> Maybe (Image PixelRGB8)
-doAnim info samplesPerFrame sampleRate static = Just $ generateImage genPixel width height
+doAnim :: ((Int, Int),Int) -> Bool -> Maybe (Image PixelRGB8)
+doAnim info static = Just $ generateImage genPixel width height
   --p <- writePng path $ generateImage genPixel width height
   where genPixel x y = colorFromIter hue $ if static then (readIter x y, readMag x y) else genIter x y frameN hueDB
         h = hueDB `div` (10*sensitivity)
@@ -185,23 +197,28 @@ doAnim info samplesPerFrame sampleRate static = Just $ generateImage genPixel wi
         (path, frameN, db) = (genPath $ fst s, fromIntegral $ fst s, snd s)
         (s, hueDB) = info
 
-doAnimSave :: ((Int, Int),Int) -> Int -> Int -> Bool -> IO ()
-doAnimSave info samplesPerFrame sampleRate static = do
+doAnimSave :: ((Int, Int),Int) -> FilePath -> Bool -> IO ()
+doAnimSave info path static = do
 
-  --_ <- putStr $ printf "Gerando %d level %d compression %d\ts: %.2f" frameN hue compression (toFloat (frameN * samplesPerFrame) / fromIntegral sampleRate)
+  let image = fromMaybe (generateImage (\x y -> PixelRGB8 (fromIntegral x) (fromIntegral x) (fromIntegral x)) 1 1 ) $ doAnim info static
 
-  writePng path $ generateImage genPixel width height
-  where genPixel x y = colorFromIter hue $ if static then (readIter x y, readMag x y) else genIter x y frameN hueDB
-        h = hueDB `div` (10*sensitivity)
-        hue = mod (db `div` (30*sensitivity) + h + frameN `div` 60) maxi
-        (path, frameN, db) = (genPath $ fst s, fromIntegral $ fst s, snd s)
-        (s, hueDB) = info
+  if imageWidth image == 0 then putStr "" else writePng path image
+
+
+writeVideo :: [((Int, Int), Int)] -> Int -> Int -> Int ->  IO ()
+writeVideo dbList spf sr total = do
+  let listOfImage = map (`doAnim` estático) dbList ++ [Nothing]
+
+  save <- imageWriter (EncodingParams (fromIntegral width) (fromIntegral height) (round framerate) Nothing Nothing "medium" Nothing) videoPath
+
+  mapM_ (\(n,z) -> save z >> status total n) $ zip [1..] listOfImage
+
 
 main :: IO ()
 main = do
   _ <- hSetBuffering stdout NoBuffering
 
-  p <- getWAVEFile "./mandeloso.wav" --Lendo nosso arquivo
+  p <- getWAVEFile musicPath --Lendo nosso arquivo
 
   let header = waveHeader p
 
@@ -225,11 +242,13 @@ main = do
 
   let offsetSamples = if samplesPerFrame > 1024 then 0 else 1024 - samplesPerFrame  --Não queremos menos que 1024 samples por frame, entao usaremos offset 
 
-  let rangeFrames = [0..duração * round framerate]
+  let total = duração * round framerate
 
+  let rangeFrames = [0..total]
 
+  _ <- putStrLn $ printf "%dx%d - %.f fps" width height framerate
   _ <- putStrLn $ printf "Sample Count: %d" samples
-  _ <- putStrLn $ printf "SampleRate: %d\nduracao em segundos: %d\nNumero de frames: %d" sampleRate duração (duração * round framerate)
+  _ <- putStrLn $ printf "SampleRate: %d\nduracao em segundos: %d\nNumero de frames: %d" sampleRate duração total
   _ <- putStrLn $ printf "cada frame representará %d + %d offset samples" samplesPerFrame offsetSamples
 
 
@@ -241,17 +260,19 @@ main = do
   let dbList = getAnimationTimings waveSmp rangeFrames samplesPerFrame duração
 
 
-  _ <- putStr "PRONTO??? [Y]"
-  _ <- getLine
+  _ <- putStr "Deseja salvar em vídeo? [Y/N] "
+  opt <- getLine
 
-  --mapM_ (\x -> doAnimSave x samplesPerFrame sampleRate True) dbList
-  --_ <- exitSuccess
+  _ <- if null opt || 'y' /= toLower (head opt) && 'n' /= toLower (head opt)
+    then exitFalha "Não entendi. Abortando."
+    else putStrLn (if 'y' == toLower (head opt) then "Saída de vídeo" else "Saída em imagens")
 
-  let listOfImage = map (\x -> doAnim x samplesPerFrame sampleRate True) dbList ++ [Nothing]
+  let opt1 = 'n' == toLower (head opt)
 
-  saveToVideo <- imageWriter (EncodingParams (fromIntegral width) (fromIntegral height) (round framerate) Nothing Nothing "medium" Nothing) "./mandelbrot.mp4"
+  if opt1
+    then mapM_ (\(n,x) -> doAnimSave x (genPath $ truncate n) estático >> status total n) $ zip [1..] dbList
 
-  mapM_ saveToVideo listOfImage
+    else writeVideo dbList samplesPerFrame sampleRate total
 
-  print "Done"
+  putStrLn "\nDone"
 
