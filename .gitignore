@@ -6,3 +6,6 @@ mandelbrot.*
 dist*
 .vscode
 .ghc*
+anim
+*.wav
+*.mp4
