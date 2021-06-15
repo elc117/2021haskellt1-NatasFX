@@ -34,24 +34,23 @@ videoPath = "./mandelbrot.mp4"
 imagesPath = "./anim/%d.png"
 
 width = 512           -- largura
-height = 512         -- altura
-maxIter = 400        -- numero maximo de iterações
-hueOffset = 100         -- caso queira que a cor inicial seja diferente 
+height = 512          -- altura
+maxIter = 240         -- numero maximo de iterações
+hueOffset = 100       -- caso queira que a cor inicial seja diferente 
 
-maxZoom = 1.0519276269095182e16               --Zoom maximo suportado
--- -1.940157358
+maxZoom = 1.6519276269095182e16     --Zoom maximo suportado
+
 coordX =  0.36024044343761436323612524444954530848260780795858575048837581474019534605  -- Coordenadas X
 coordY = -0.64131306106480317486037501517930206657949495228230525955617754306444857417  -- Coordenadas Y
-framerate = 30        -- Framerate do vídeo
 
-sensitivity = 15      -- Sensibilidade ao grave maior = menos sensível
-fixedZoom = 13--27.8  -- Zoom caso estático for True
+framerate = 60        -- Framerate do vídeo
 
+sensitivity = 30      -- Sensibilidade ao grave maior = menos sensível
 
 estático :: Bool
-estático = True       -- Quando True ele não fará zoom e se manterá estático em fixedZoom
+estático = False       -- Quando True ele não fará zoom e se manterá estático em fixedZoom
 
-
+fixedZoom = 18        -- Zoom caso estático for True
 
 
 -----------------------------------------------------------
@@ -124,9 +123,9 @@ colorFromIter hue iterPoint
   | iter == maxIter = PixelRGB8 0 0 0
   | otherwise = PixelRGB8 (palleteR!i) (palleteG!i) (palleteB!i)
   where (iter,mag) = iterPoint
-        i = truncate $ color * toFloat maxi
+        i = mod (truncate (color * toFloat maxi)) maxi
         color = toFloat ix / toFloat points -- Entre 0 e 1, representa um ciclo de cores
-        ix      = truncate (sqrt (toFloat iter + 1 - logBase 2 (logBase 2 mag))*256 + toFloat hue*5 + toFloat hueOffset ) `mod` points
+        ix      = truncate (sqrt (toFloat iter + 1 - logBase 2 (logBase 2 mag))*256 + toFloat hue*4.4 + toFloat hueOffset ) `mod` points
         points  = 2048
 
 genIter :: Int -> Int -> Int -> Int -> (Int, Double)
@@ -185,12 +184,8 @@ getAnimationTimings samples rangeFrames spf dur = map (\(sz, db) -> ((sz, db), f
 -----------------------------------------------------------
 -- Criação da imagem
 -----------------------------------------------------------
---ffmpeg -framerate 30 -i %d.png -c:v libx264 -crf 10 -pix_fmt yuv420p output.mp4 && ffmpeg -i output.mp4 -i ../mandelbrot.wav -map 0:v -map 1:a -c:v copy -shortest output1.mp4
---ffmpeg -i output.mp4 -i ../../mandelbrot.wav -map 0:v -map 1:a -c:v copy -shortest output1.mp4
-
 doAnim :: ((Int, Int),Int) -> Bool -> Maybe (Image PixelRGB8)
 doAnim info static = Just $ generateImage genPixel width height
-  --p <- writePng path $ generateImage genPixel width height
   where genPixel x y = colorFromIter hue $ if static then (readIter x y, readMag x y) else genIter x y frameN hueDB
         h = hueDB `div` (10*sensitivity)
         hue = mod (db `div` (30*sensitivity) + h + frameN `div` 60) maxi
@@ -214,6 +209,9 @@ writeVideo dbList spf sr total = do
   mapM_ (\(n,z) -> save z >> status total n) $ zip [1..] listOfImage
 
 
+-----------------------------------------------------------
+-- Main
+-----------------------------------------------------------
 main :: IO ()
 main = do
   _ <- hSetBuffering stdout NoBuffering
@@ -224,13 +222,12 @@ main = do
 
   -- Esse número 32768 é quando estamos lendo word8 signed como unsigned
   -- então o que deveria ser 0 signed se torna 32768 unsigned (10000000 = -32768 signed but 10000000 unsiged = 32768)
-  -- que aparentemente a lib WAVE lê incorretamente (?)
   -- o FFT não se importa mt, math is beautiful
-  let waveSmpAll = [fromIntegral (sum l) /32768/ toFloat (waveNumChannels header)| l <- waveSamples p] --todas nossas samples
+  let waveSmpAll = [fromIntegral (head l) /32768 | l <- waveSamples p] --todas nossas samples
 
   let sampleRate = waveFrameRate header  --Numero de samples e.g 44100
 
-  let waveSmp = drop (sampleRate `div` 10) waveSmpAll -- Isso irá colocar nosso vídeo 100ms adiantado, melhor sincronismo
+  let waveSmp = drop (sampleRate `div` 7) waveSmpAll -- Isso irá colocar nosso vídeo 100ms adiantado, melhor sincronismo
 
   let samples = fromMaybe 0 $ waveFrames header     -- Total de samples da nossa música
 
@@ -275,4 +272,3 @@ main = do
     else writeVideo dbList samplesPerFrame sampleRate total
 
   putStrLn "\nDone"
-
