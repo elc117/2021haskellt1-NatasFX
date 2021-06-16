@@ -6,7 +6,7 @@ Este é meu trabalho 1 da disciplina de Paradigmas de Programação.
 
 O Programa gera um vídeo de zoom no Conjunto de Mandelbrot, sincronizando com as batidas de uma música fornecida.
 
-Aqui tem um exemplo do que ele faz. https://youtu.be/yOgwc98WI6c https://youtu.be/zgL_FIpS_T8
+Aqui tem um exemplo do que ele faz. https://youtu.be/yOgwc98WI6c https://youtu.be/w8SpVDVj1yM
 
 Existem outras versões deste projeto. A que ficou melhor foi esta. Caso interessar estão nas outras branchs.
 
