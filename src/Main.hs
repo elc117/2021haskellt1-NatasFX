@@ -15,8 +15,9 @@ import Math.FFT ( dftRC )
 import Data.Array.CArray
 import qualified Data.Array.IArray
 import Data.Complex
-import Data.Maybe
-import Data.Char
+import Data.Maybe ( fromMaybe )
+import Data.Char ( toLower )
+import System.Process ( shell, callCommand )
 
 
 type CComplex = (Double, Double)
@@ -26,17 +27,17 @@ type CComplex = (Double, Double)
 -- Variáveis pré-definidas
 -----------------------------------------------------------
 musicPath, videoPath, imagesPath :: FilePath
-width, height, maxIter, hueOffset, sensitivity :: Int
+width, height, maxIter, hueOffset, sensitivity, dropped :: Int
 coordY, coordX, maxZoom, framerate, fixedZoom :: Double
 
 musicPath = "./mandeloso.wav"
 videoPath = "./mandelbrot.mp4"
 imagesPath = "./anim/%d.png"
 
-width = 512           -- largura
-height = 512          -- altura
-maxIter = 240         -- numero maximo de iterações
-hueOffset = 100       -- caso queira que a cor inicial seja diferente 
+width = 1920          -- largura
+height = 1080        -- altura
+maxIter = 90        -- numero maximo de iterações
+hueOffset = -150       -- caso queira que a cor inicial seja diferente 
 
 maxZoom = 1.6519276269095182e16     --Zoom maximo suportado
 
@@ -45,13 +46,14 @@ coordY = -0.64131306106480317486037501517930206657949495228230525955617754306444
 
 framerate = 60        -- Framerate do vídeo
 
-sensitivity = 30      -- Sensibilidade ao grave maior = menos sensível
+sensitivity = 20      -- Sensibilidade ao grave maior = menos sensível
 
 estático :: Bool
 estático = False       -- Quando True ele não fará zoom e se manterá estático em fixedZoom
 
-fixedZoom = 18        -- Zoom caso estático for True
+fixedZoom = 17.5        -- Zoom caso estático for True
 
+dropped = 0       -- Se quiser retomar uma animação pelo numero da imagem, use aqui
 
 -----------------------------------------------------------
 -- Funções diversas
@@ -72,9 +74,9 @@ exitFalha s = do
 toFloat :: Int -> Double
 toFloat i = fromIntegral i :: Double
 
-status :: Int -> Double -> IO ()
+status :: Int -> Int -> IO ()
 status total n = do
-  putStr (printf "\r%.f%%\t- %d/%d Frames" (n/toFloat total*100) (round n::Int) total)
+  putStr (printf "\r%.f%%\t- %d/%d Frames" (toFloat n/toFloat total*100) n total)
 
 
 -----------------------------------------------------------
@@ -125,8 +127,8 @@ colorFromIter hue iterPoint
   where (iter,mag) = iterPoint
         i = mod (truncate (color * toFloat maxi)) maxi
         color = toFloat ix / toFloat points -- Entre 0 e 1, representa um ciclo de cores
-        ix      = truncate (sqrt (toFloat iter + 1 - logBase 2 (logBase 2 mag))*256 + toFloat hue*4.4 + toFloat hueOffset ) `mod` points
-        points  = 2048
+        ix = truncate (sqrt (toFloat iter + 1 - logBase 2 (logBase 2 mag))*200 + toFloat hue*4 + toFloat hueOffset ) `mod` points
+        points = 2048
 
 genIter :: Int -> Int -> Int -> Int -> (Int, Double)
 genIter  x y frame db = calcPoint (xPos, yPos) (0,0) 0
@@ -136,7 +138,7 @@ genIter  x y frame db = calcPoint (xPos, yPos) (0,0) 0
         (x', y') = (fromIntegral x, fromIntegral y)
         size = 2** if frame == -1 then fixedZoom else exponent
         exponent = if exp > maxZoom then maxZoom else exp
-        exp = fromIntegral (frame + db `div` 180)/(framerate*10)+7
+        exp = fromIntegral (frame + db `div` 160)/(framerate*10)+7
 
 
 -----------------------------------------------------------
@@ -177,8 +179,8 @@ cleanComplex c = sum stripped `div` 10
 
 getAnimationTimings :: [Double] -> [Int] -> Int -> Int -> [((Int, Int), Int)]
 getAnimationTimings samples rangeFrames spf dur = map (\(sz, db) -> ((sz, db), foldl1 (\n x -> n + x `div` 15) $ take sz [snd t | t <- newSt])) newSt
-  where newSt = map (\sz -> (sz, foldl1 (\n x -> n - (n-x) `div` 4) $ take sz st)) [2..dur * round framerate]
-        st = map (\x -> cleanComplex $ dftRC $ carray $ drop (spf*x+1) samples) rangeFrames
+  where st = map (\x -> cleanComplex $ dftRC $ carray $ drop (spf*x+1) samples) rangeFrames
+        newSt = map (\sz -> (sz, foldl1 (\n x -> n - (n-x) `div` 4) $ take sz st)) [2..dur * round framerate]
 
 
 -----------------------------------------------------------
@@ -188,16 +190,16 @@ doAnim :: ((Int, Int),Int) -> Bool -> Maybe (Image PixelRGB8)
 doAnim info static = Just $ generateImage genPixel width height
   where genPixel x y = colorFromIter hue $ if static then (readIter x y, readMag x y) else genIter x y frameN hueDB
         h = hueDB `div` (10*sensitivity)
-        hue = mod (db `div` (30*sensitivity) + h + frameN `div` 60) maxi
+        hue = mod (db `div` (20*sensitivity) + h + frameN `div` 60) maxi
         (path, frameN, db) = (genPath $ fst s, fromIntegral $ fst s, snd s)
         (s, hueDB) = info
 
 doAnimSave :: ((Int, Int),Int) -> FilePath -> Bool -> IO ()
 doAnimSave info path static = do
 
-  let image = fromMaybe (generateImage (\x y -> PixelRGB8 (fromIntegral x) (fromIntegral x) (fromIntegral x)) 1 1 ) $ doAnim info static
+  let image = fromMaybe (generateImage (\x y -> PixelRGB8 0 0 0) 2 2 ) $ doAnim info static
 
-  if imageWidth image == 0 then putStr "" else writePng path image
+  if imageWidth image < 3 then putStrLn "" else writePng path image
 
 
 writeVideo :: [((Int, Int), Int)] -> Int -> Int -> Int ->  IO ()
@@ -206,7 +208,9 @@ writeVideo dbList spf sr total = do
 
   save <- imageWriter (EncodingParams (fromIntegral width) (fromIntegral height) (round framerate) Nothing Nothing "medium" Nothing) videoPath
 
-  mapM_ (\(n,z) -> save z >> status total n) $ zip [1..] listOfImage
+  mapM_ (\(n,z) -> status total n >> save z) $ zip [1..] listOfImage
+
+  callCommand $ printf "ffmpeg -i %s -i %s -map 0:v -map 1:a -c:v copy -shortest %s -y" videoPath musicPath ( reverse (drop 4 $ reverse videoPath) ++ "_audio.mp4")
 
 
 -----------------------------------------------------------
@@ -227,7 +231,7 @@ main = do
 
   let sampleRate = waveFrameRate header  --Numero de samples e.g 44100
 
-  let waveSmp = drop (sampleRate `div` 7) waveSmpAll -- Isso irá colocar nosso vídeo 100ms adiantado, melhor sincronismo
+  let waveSmp = drop (sampleRate `div` 9) waveSmpAll -- Isso irá colocar nosso vídeo 100ms adiantado, melhor sincronismo
 
   let samples = fromMaybe 0 $ waveFrames header     -- Total de samples da nossa música
 
@@ -237,8 +241,6 @@ main = do
 
   let samplesPerFrame = sampleRate `div` round framerate
 
-  let offsetSamples = if samplesPerFrame > 1024 then 0 else 1024 - samplesPerFrame  --Não queremos menos que 1024 samples por frame, entao usaremos offset 
-
   let total = duração * round framerate
 
   let rangeFrames = [0..total]
@@ -246,7 +248,6 @@ main = do
   _ <- putStrLn $ printf "%dx%d - %.f fps" width height framerate
   _ <- putStrLn $ printf "Sample Count: %d" samples
   _ <- putStrLn $ printf "SampleRate: %d\nduracao em segundos: %d\nNumero de frames: %d" sampleRate duração total
-  _ <- putStrLn $ printf "cada frame representará %d + %d offset samples" samplesPerFrame offsetSamples
 
 
   {- Chamamos essa função para retornar uma lista de informações úteis para
@@ -254,8 +255,7 @@ main = do
      [((a, b), c)] onde a é o numero do frame
      b é quantidade de grave que o fft disse que tem no frame atual
      c é a versão suavizada de b, objetivo dela é não ter picos extremos -}
-  let dbList = getAnimationTimings waveSmp rangeFrames samplesPerFrame duração
-
+  let dbList = drop dropped $ getAnimationTimings waveSmp rangeFrames samplesPerFrame duração
 
   _ <- putStr "Deseja salvar em vídeo? [Y/N] "
   opt <- getLine
@@ -264,10 +264,9 @@ main = do
     then exitFalha "Não entendi. Abortando."
     else putStrLn (if 'y' == toLower (head opt) then "Saída de vídeo" else "Saída em imagens")
 
-  let opt1 = 'n' == toLower (head opt)
 
-  if opt1
-    then mapM_ (\(n,x) -> doAnimSave x (genPath $ truncate n) estático >> status total n) $ zip [1..] dbList
+  if 'n' == toLower (head opt)
+    then mapM_ (\(n, x) -> status total n >> doAnimSave x (genPath n) estático) $ zip [dropped..] dbList
 
     else writeVideo dbList samplesPerFrame sampleRate total
 
